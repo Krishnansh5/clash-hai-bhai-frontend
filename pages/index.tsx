@@ -1,9 +1,13 @@
 import Head from 'next/head'
-import styles from '../styles/Home.module.css'
 import { DataGrid,GridColDef } from '@mui/x-data-grid';
-import { Button,Card, Grid, InputLabel, MenuItem, Select, SelectChangeEvent, Stack, Typography} from '@mui/material';
-import allTemplates from '../public/template.json'
-import { useState } from 'react';
+import { Button,Card, CssBaseline, Grid, IconButton, InputLabel, MenuItem, Select, SelectChangeEvent, Stack, Typography,Paper} from '@mui/material';
+import { useState,useMemo } from 'react';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { course_data } from "../js/course_data.js"
+import { template_data } from '../js/template.js'
+import { get_eligible_courses } from "../js/get_course_utils.js"
 
 interface semTemplate {
   "1":string[];
@@ -16,44 +20,54 @@ interface semTemplate {
   "8":string[];
 }
 
+const allDepts = Object.keys(course_data);
+const allTemplates = template_data;
 interface course {
   course: string;
 }
 
-const getAllAvailableCourses = async (branch: string,sem: number) => {
-  const requestParams: {branch: string; sem: number;} = { //change according to backend functions
-    branch: branch,
-    sem: sem
-  };
-  const response = await fetch("",{ // request URL to be determined by backend 
-    method:"POST",
-    body: JSON.stringify(requestParams)
-  });
-  return response; // Check type accoring to backend (Probably: string[])
+interface availableCourses {
+  credits: string;
+  instructor: string;
+  instuctor_email: string;  
+  lec: string;
+  tut: string;
+  lab: string;
+  course_code: string;
 }
 
-const checkCourseClash = async (courseReq: string,currTemplate: string[]) => {
-  const requestParams: {courseReq: string; currTemplate: string[];} = { //change according to backend functions
-    courseReq: courseReq,
-    currTemplate: currTemplate
-  };
-  const response = await fetch("",{ // request URL to be determined by backend 
-    method:"POST",
-    body: JSON.stringify(requestParams)
-  });
-  return response; // Check type accoring to backend (Probably: boolean)
-}
+const semesters = ["2","4","6","8"];
 
-const dummyAvailableCourses = ["PE101","PE102","PE103","PE104"];
+export default function Home(){
 
-const semesters = ["1","2","3","4","5","6","7","8"];
+  const [mode, setMode] = useState<'light' | 'dark'>('light');
+  const colorMode = useMemo(
+    () => ({
+      toggleColorMode: () => {
+        setMode((prevMode) => (prevMode === 'light' ? 'dark' : 'light'));
+      },
+    }),
+    [],
+  );
 
-export default function Home() {
+  const theme = useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode,
+        },
+      }),
+    [mode],
+  );
+
   const allBranches: string[] = Object.keys(allTemplates);
   const [allSemTemplates,setAllSemTemplates] = useState<semTemplate>({} as semTemplate);
   const [branch, setBranch] = useState<string>("");
   const [sem, setSem] = useState<string>("");
+  const [deptToChooseCourseFrom,setDeptToChooseCourseFrom] = useState<string>("");
   const [template,setTemplate] = useState<string[]>([]);
+  const [templateRows,setTemplateRows] = useState<course[]>([])
+  const [allAvailableCourses,setAllAvailableCourses] = useState<availableCourses[]>([]);
 
   const handleChangeBranch = (event: SelectChangeEvent) => {
     setBranch(event.target.value as string);
@@ -69,20 +83,38 @@ export default function Home() {
     for (const key in allSemTemplates){
       if(key === event.target.value){
         setTemplate(allSemTemplates[key as keyof typeof allSemTemplates]);
-        // Add a request to check available courses by calling getAllAvailableCourses
-        // Or maybe we are going to store the available courses in JSON file ?? then no need for getAllAvailableCourses
+        const tempObject = allSemTemplates[key as keyof typeof allSemTemplates].map((value) => ({course: value} as course));
+        setTemplateRows(tempObject);
       }
+    }
+    if(deptToChooseCourseFrom!==""){
+      const elegible_courses = get_eligible_courses(template,deptToChooseCourseFrom);
+      setAllAvailableCourses(elegible_courses);
     }
   };
 
+  const handleChangeDept = (event: SelectChangeEvent) => {
+    setDeptToChooseCourseFrom(event.target.value as string);
+    const elegible_courses = get_eligible_courses(template,event.target.value);
+    setAllAvailableCourses(elegible_courses);
+  }
+
   const handleCourseDrop = (dropCourse: string) => {
-    setTemplate(template.filter((value) => (value !== dropCourse)));
+    setAllAvailableCourses([]);
+    const template_filtered = template.filter((value) => (value !== dropCourse));
+    setTemplate(template_filtered);
+    setTemplateRows(template_filtered.map((value) => ({course: value} as course)));
+    const elegible_courses = get_eligible_courses(template,deptToChooseCourseFrom);
+    setAllAvailableCourses(elegible_courses);
   }
 
   const handleCourseAdd = (addCourse: string) => {
-    console.log("adding course");
-    // request backend to check for timing clash by calling the checkCourseClash function
-    // then accordingly append course into template and remove it from availableCourses
+    const newTemplate: string[] = template.concat([addCourse]);
+    const newTemplateObject = newTemplate.map((value) => ({course: value} as course))
+    setTemplate(newTemplate);
+    setTemplateRows(newTemplateObject);
+    const elegible_courses = get_eligible_courses(newTemplate,deptToChooseCourseFrom);
+    setAllAvailableCourses(elegible_courses);
   }
 
   const template_cols: GridColDef[] = [
@@ -108,8 +140,29 @@ export default function Home() {
 
   const courses_cols: GridColDef[] = [
     {
-      field: 'course',
-      headerName: 'Course'
+      field: 'course_code',
+      headerName: 'Course Code'
+    },
+    {
+      field: 'lec',
+      headerName: 'Lecture Timings'
+    },
+    {
+      field: 'tut',
+      headerName: 'Tutorial Timings'
+    },
+    {
+      field: 'lab',
+      headerName: 'Lab Timings'
+    }, 
+    {
+      field: 'instructor',
+      headerName: 'Instructor'
+    },
+    {
+      field: 'instructor_email',
+      headerName: 'Instructor E-mail',
+      hide: true
     },
     {
       field: "options",
@@ -119,7 +172,7 @@ export default function Home() {
           variant="outlined" 
           color="success" 
           onClick={() => {
-              handleCourseAdd(params.row.course)
+              handleCourseAdd(params.row.course_code)
             }}>
           Add
         </Button>
@@ -128,81 +181,112 @@ export default function Home() {
   ]
 
   return (
+    <ThemeProvider theme={theme}>
+    <CssBaseline />
     <div>
-      <Head>
-        <title>Clash Hai Bhai!</title>
-        <meta name="description" content="Generated by create next app" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
-      
-      <Stack spacing={4} alignItems="center">
-        <Typography variant="h3" align="center" gutterBottom>
-          Clash Hai Bhai!
-        </Typography>
-        <Stack 
-          direction={{ xs: 'column', sm: 'row' }} 
-          spacing={{ xs: 1, sm: 2, md: 4 }}
-          justifyContent = "center"
+        <Head>
+          <title>Clash Hai Bhai!</title>
+          <meta name="description" content="Generated by create next app" />
+          <link rel="icon" href="/favicon.ico" />
+        </Head>
+      <Paper sx={{height: "1000vh"}}>
+        <Stack spacing={4} alignItems="center">
+          <Stack 
+            direction="row" 
+            justifyContent="flex-end" 
+            spacing={1} 
+            padding={1} 
+            sx={{width: "100%"}}
           >
-          <Stack>
-            <InputLabel id="branch-select">Select Branch</InputLabel>
-            <Select
-              labelId = "branch-select"
-              id="branch-select"
-              value={branch}
-              label="Select Branch"
-              onChange={handleChangeBranch}
-            >
-              {
-                (allBranches.map((branch,index) => {
-                  return (<MenuItem key={index} value={branch}>{branch}</MenuItem>)
-                }))
-              }
-            </Select>
+            <IconButton sx={{ ml: 1 }} onClick={colorMode.toggleColorMode} color="inherit">
+              {theme.palette.mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+            </IconButton>
           </Stack>
-          <Stack>
-            <InputLabel id="sem-select">Select Semester</InputLabel>
-            <Select
-              labelId = "sem-select"
-              id="sem-select"
-              value={sem}
-              label="Select Semester"
-              onChange={handleChangeSem}
+          <Typography variant="h3" align="center" gutterBottom>
+            Clash Hai Bhai!
+          </Typography>
+          <Stack 
+            direction={{ xs: 'column', sm: 'row' }} 
+            spacing={{ xs: 1, sm: 2, md: 4 }}
+            justifyContent = "center"
             >
-              {
-                (branch!=="" && (semesters.map((sem,index) => {
-                  return (<MenuItem key={index} value={sem}>{sem}</MenuItem>)
-                })))
-              }
-            </Select>
+            <Stack>
+              <InputLabel id="branch-select">Select Branch</InputLabel>
+              <Select
+                labelId = "branch-select"
+                id="branch-select"
+                value={branch}
+                label="Select Branch"
+                onChange={handleChangeBranch}
+              >
+                {
+                  (allBranches.map((branch,index) => {
+                    return (<MenuItem key={index} value={branch}>{branch}</MenuItem>)
+                  }))
+                }
+              </Select>
+            </Stack>
+            <Stack>
+              <InputLabel id="sem-select">Select Semester</InputLabel>
+              <Select
+                labelId = "sem-select"
+                id="sem-select"
+                value={sem}
+                label="Select Semester"
+                onChange={handleChangeSem}
+              >
+                {
+                  (branch!=="" && (semesters.map((sem,index) => {
+                    return (<MenuItem key={index} value={sem}>{sem}</MenuItem>)
+                  })))
+                }
+              </Select>
+            </Stack>
           </Stack>
+          <Card
+            elevation={5}
+            sx={{
+              padding: 5,
+              width: {
+                md: "90%",
+                xs: "100%",
+              },
+            }}
+          >
+            <Grid container spacing={4}>
+              <Grid item xs={12} md={6}>
+                <Stack>
+                  <Typography>Your Template</Typography>
+                  <DataGrid getRowId = {(row) => row.course} columns={template_cols} rows={templateRows} autoHeight/>
+                </Stack>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Stack>
+                  <Typography>Available courses</Typography>
+                  <DataGrid columns={courses_cols} rows={allAvailableCourses} getRowId = {(row) => row.course_code} autoHeight/>
+                </Stack>
+              </Grid>
+            </Grid>
+            <Stack sx={{width: "10%"}}>
+              <InputLabel id="dept-select ">Select Branch</InputLabel>
+              <Select
+                labelId = "dept-select"
+                id="dept-select"
+                value={deptToChooseCourseFrom}
+                label="Select Branch"
+                onChange={handleChangeDept}
+              >
+                {
+                  (allDepts.map((dept,index) => {
+                    return (<MenuItem key={index} value={dept}>{dept}</MenuItem>)
+                  }))
+                }
+              </Select>
+            </Stack>
+          </Card>
         </Stack>
-        <Card
-          elevation={5}
-          sx={{
-            padding: 5,
-            width: {
-              md: "800px",
-              xs: "100%",
-            },
-          }}
-        >
-          <Grid container spacing={4}>
-            <Grid item xs={12} md={6}>
-              <Stack>
-                <Typography>Your Template</Typography>
-                <DataGrid columns={template_cols} rows={template.map((value) => ({course: value} as course))} getRowId = {(row) => row.course} autoHeight sx={{maxHeight: 500}}/>
-              </Stack>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Stack>
-                <Typography>Available courses</Typography>
-                <DataGrid columns={courses_cols} rows={dummyAvailableCourses.map((value) => ({course: value} as course))} getRowId = {(row) => row.course} autoHeight sx={{maxHeight: 500}}/>
-              </Stack>
-            </Grid>
-          </Grid>
-        </Card>
-      </Stack>
+      </Paper>
     </div>
+    </ThemeProvider>
   );
 }
